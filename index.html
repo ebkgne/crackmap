@@ -1,0 +1,504 @@
+<link rel="stylesheet" href="https://js.arcgis.com/4.22/esri/themes/light/main.css" />
+<script src="https://js.arcgis.com/4.22/"></script>
+<script  type="text/javascript" src="data/climbingaway.json""></script>
+<script  type="text/javascript" src="data/sitesparapente.json""></script>
+<script  type="text/javascript" src="data/canyons.json""></script>
+
+<style>
+
+#viewDiv {padding: 0; margin: 0; height: 100%; width: 100%; }
+
+#rendererDiv { width: 250px; }
+
+.slider { height: 40px; width: 100%; }
+
+.esri-layer-list-panel { margin: 1px 15px; }
+
+</style>
+
+<script>
+
+//  ##################
+//  # INCLUDES (santièp')
+//  ##################
+
+ require([
+        
+        "esri/Map", 
+        "esri/views/SceneView",
+        "esri/views/MapView",
+        "esri/layers/ImageryTileLayer",
+        "esri/layers/VectorTileLayer",
+        "esri/renderers/RasterShadedReliefRenderer",
+        "esri/widgets/Slider",
+        "esri/widgets/Expand",
+        "esri/rest/support/MultipartColorRamp",
+        "esri/layers/FeatureLayer",
+        "esri/layers/support/TileInfo",
+        "esri/widgets/LayerList",
+        "esri/widgets/DirectLineMeasurement3D",
+        "esri/widgets/AreaMeasurement3D",
+        "esri/core/promiseUtils",
+        "esri/Graphic",
+        "esri/widgets/Search",
+        "esri/geometry/SpatialReference",
+        "esri/geometry/Point",
+        "esri/layers/support/LOD",
+        "esri/renderers/SimpleRenderer",
+        "esri/layers/SceneLayer",
+        "esri/layers/MapImageLayer",
+        
+      ], (
+        
+        Map, 
+        SceneView,
+        MapView,
+        ImageryTileLayer,
+        VectorTileLayer,
+        RasterShadedReliefRenderer,
+        Slider,
+        Expand,
+        MultipartColorRamp,
+        FeatureLayer,
+        TileInfo,
+        LayerList,
+        DirectLineMeasurement3D,
+        AreaMeasurement3D,
+        promiseUtils,
+        Graphic,
+        Search,
+        SpatialReference,
+        Point,
+        LOD,
+        SimpleRenderer,
+        SceneLayer,
+        MapImageLayer
+      
+      ) => {  
+
+
+//  ##################
+//  # UTILITIES
+//  ##################
+
+// ################## ACTUALLY FOR MARKERS ##################
+
+function deg2rad(deg) {
+  return deg * (Math.PI/180)
+}
+
+function getDistanceFromLatLonInKm(lat1,lon1,lat2,lon2) {
+  var R = 6371; // Radius of the earth in km
+  var dLat = deg2rad(lat2-lat1);  // deg2rad below
+  var dLon = deg2rad(lon2-lon1); 
+  var a = 
+    Math.sin(dLat/2) * Math.sin(dLat/2) +
+    Math.cos(deg2rad(lat1)) * Math.cos(deg2rad(lat2)) * 
+    Math.sin(dLon/2) * Math.sin(dLon/2)
+    ; 
+  var c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a)); 
+  var d = R * c; // Distance in km
+  return d;
+}
+
+function fade(from, to, q) { return parseInt(from+(to-from)*q); }
+
+/// ################## ACTUALLY FOR COLOR WIDGET ##################
+
+function getRamp(ramp) {
+
+var ramp_h = ramp.length-1;
+
+blah = [];
+lastColor=[];
+curr = 1;
+
+steps_total = 150
+steps_h = steps-1;
+
+for (var p = 0; p < ramp_h; p++) {
+
+  p1 = p+1;
+
+  var steps = steps_total*(ramp[p1][0]-ramp[p][0]);
+  var steps_h = steps-1;
+
+  for (var i = 0; i < steps; i++) {
+    
+    nextColor = [
+
+      fade(ramp[p][1],ramp[p1][1],i/steps_h),
+      fade(ramp[p][2],ramp[p1][2],i/steps_h),
+      fade(ramp[p][3],ramp[p1][3],i/steps_h)
+
+    ];
+    
+    if (blah.length == 0) lastColor = nextColor
+
+    blah[curr-1] = { fromColor:lastColor, toColor : nextColor};
+  
+    lastColor = nextColor;
+
+    curr++;
+
+  }
+
+}
+
+return blah;
+
+}
+
+/// ################## GET URL PARAMETER ##################
+
+function getUrlParameter(name) {
+
+  name = name.replace(/[\[]/, '\\[').replace(/[\]]/, '\\]');
+  var regex = new RegExp('[\\?&]' + name + '=([^&#]*)');
+  var results = regex.exec(location.search);
+  return results === null ? '' : decodeURIComponent(results[1].replace(/\+/g, ' '));
+
+};
+//alert lat
+url_lat = getUrlParameter('lat')
+url_lon = getUrlParameter('lon')
+
+//  ##################
+//  # DEFINES
+//  ##################
+
+var mylat = (url_lat ? url_lat : 43.352255056691305);
+var mylon = (url_lon ? url_lon : 2.699491771819285);
+
+const esrifrance_token = "kbN*dPgsD3PhaSgGcLQfQPe0.NkoSF6R2UNCYboeJf4WnjXArD2F8i7JIIc9s8UP6N3Y3WOcWQ1J8WWQNW7yvJrYWAG6ERgYAje65eoJwJlKXnM3GfqX*pmRzm9WXDZrUgEEGcoVGvup3pNnCMyFYQyt9cZwSAcb32h3C5P0iKthUVrEKNqBCliaLma1eD82A.KsX0vHIojA.jNS094MOWrCVMKb7qsBmKn.VIXeg5Vvvq1hfgZfx5Se1tMWUkcKeLOw0AdyFgfBtLKaZ9G6TsD15Ih8bhFi*Dydfq6nkCs-"
+const esrifrance_service = "https://services.esrifrance.fr/arcgis/tokenaccess/"+esrifrance_token+"/rest/services/"
+
+
+//  ##################
+//  # LAYERS
+//  ##################
+
+let layers = [];
+
+/// ################## ELEVATION  COLORIZED ##################
+
+const renderer = new  RasterShadedReliefRenderer({ hillshadeType: "traditional", scalingType: "adjusted" });
+
+layers.push(new ImageryTileLayer({ blendMode: "multiply", renderer: renderer, url: "https://elevation3d.arcgis.com/arcgis/rest/services/WorldElevation3D/Terrain3D/ImageServer" }))
+
+let hillShadeLayer =layers[layers.length-1]
+
+/// ################## ORHOGRAPHIC SATELITE  ##################
+
+layers.push(new MapImageLayer({ url: esrifrance_service+"IGN/FranceDOM_ORTHOPHOTOS/MapServer" }))
+
+/// ################## CADASTRE 2D ##################
+
+let simplefill = {type: "simple", symbol: { type: "simple-fill", style: "solid", color: [255, 204, 51, 255], outline: {color: [255, 204, 51, 255],width: 1}}}
+
+layers.push(new FeatureLayer({minScale: 50000, maxScale: 20000, renderer:simplefill, url: esrifrance_service+"DGFIP/FranceDOM_PCI/FeatureServer/14" }))
+
+/// ################## CADASTRE 3D ##################
+
+layers.push(new SceneLayer({ minScale: 20000, url: esrifrance_service+"IGN/France_BDTopo_Batiments_3D/SceneServer" }))
+
+///  ################## ROUTES ##################
+
+let simpleline = {type: "simple", symbol: { type: "simple-line", style: "solid", color: [255, 204, 51, 255]}}
+let simpleline2 = {type: "simple", symbol: { type: "simple-line",width:1, style: "solid", color: [251, 220, 251, 100]}}
+
+layers.push(new FeatureLayer({minScale: 5000000, maxScale: 00000, renderer:simpleline, url: esrifrance_service+"DGFIP/FranceDOM_PCI/FeatureServer/10" }))
+layers.push(new FeatureLayer({minScale: -5000000, renderer:simpleline2, labelsVisible :false, url: esrifrance_service+"IGN/France_BDTopo/FeatureServer/2" }))
+// layers.push(new VectorTileLayer({ url: esrifrance_service+"IGN/FranceDOM_BDTopo/VectorTileServer" }))
+
+
+//  ##################
+//  # MAP
+//  ##################
+
+const map = new Map({ basemap :"satellite", layers: layers, ground: "world-elevation" });
+// const view = new MapView({ container: "viewDiv", map: map, zoom: 12, center: [mylon,mylat] });
+const view = new SceneView({ container: "viewDiv", map: map, zoom: 13, center: [mylon,mylat] });
+
+
+//  ##################
+//  # WIDGETS
+//  ##################
+
+/// ################## UTILITIES ##################
+
+function createSlider(cont, min,max,val,cb) {
+  
+  lab = document.createElement("laabel");
+  lab.innerHTML = cont
+  lab.className = "esri-feature-form__label";
+  document.getElementById("rendererDiv").appendChild(lab);
+
+  sli = document.createElement("div");
+  sli.className = "slider";
+  sli.id = cont+"-slider";
+  document.getElementById("rendererDiv").appendChild(sli);
+
+  slider = new Slider({
+          container: cont+"-slider",
+          min: min,
+          max: max,
+          values: [val],
+          snapOnClickEnabled: false,
+          visibleElements: {
+            labels: true,
+            rangeLabels: true
+          }
+  });
+  
+  slider.on(["thumb-change", "thumb-drag"], cb);
+
+  return slider;
+
+}
+
+var markers = []
+function createMarkerLayer(data,color,lat,lon) {
+
+  for (var i = 0; i < data.length; i++) {
+
+      if (getDistanceFromLatLonInKm(mylat, mylon, data[i][lat], data[i][lon]) > 25) continue;
+
+      pointGraphic = new Graphic({
+
+        geometry: { type: "point", longitude: data[i][lon], latitude: data[i][lat] },
+        symbol: { type: "simple-marker",   color: color, size: "8px", outline: { width: 0 } }
+
+      });
+
+      markers.push(pointGraphic);
+
+      view.graphics.addMany([pointGraphic]);
+
+    }
+}
+
+
+function defineActions(event) {
+  const item = event.item;
+  if (item.title == "Terrain3D")  item.panel = {
+    content: rendererDiv,
+    className: "esri-icon-sliders-horizontal",
+    title: "Change layer opacity"
+  };
+}
+
+
+/// ################## SEARCH WIDGET ##################
+
+const searchWidget = new Search({ view: view });
+
+view.ui.add(searchWidget, { position: "top-right"});
+
+searchWidget.on('search-complete', function(result){
+  
+  mylat = result.results[0].results[0]["feature"]["geometry"].latitude;
+  mylon = result.results[0].results[0]["feature"]["geometry"].longitude;
+
+  updateMarkers();
+});
+
+const expand = new Expand({ view: view, content: document.getElementById("rendererDiv"),  expandIconClass: "esri-icon-settings2" });
+
+
+/// ################## LAYER LIST WIDGET ##################
+
+const layerList = new LayerList({ view: view, listItemCreatedFunction: defineActions});
+
+view.ui.add(layerList, "top-right");
+
+var activeWidget = null;
+view.ui.add("topbar", "top-right");
+
+document
+  .getElementById("distanceButton")
+  .addEventListener("click", (event) => {
+    setActiveWidget(null);
+    if (!event.target.classList.contains("active")) { setActiveWidget("distance"); }
+    else{  setActiveButton(null); }
+  });
+
+document
+  .getElementById("areaButton")
+  .addEventListener("click", (event) => {
+    setActiveWidget(null);
+    if (!event.target.classList.contains("active")) { setActiveWidget("area"); } 
+    else { setActiveButton(null); }
+  });
+
+function setActiveWidget(type) {
+  switch (type) {
+    case "distance":
+      activeWidget = new DirectLineMeasurement3D({
+        view: view
+      });
+
+      // skip the initial 'new measurement' button
+      activeWidget.viewModel.start().catch((error) => {
+        if (promiseUtils.isAbortError(error)) {
+          return; // don't display abort errors
+        }
+        throw error; // throw other errors since they are of interest
+      });
+
+      view.ui.add(activeWidget, "top-right");
+      setActiveButton(document.getElementById("distanceButton"));
+      break;
+    case "area":
+      activeWidget = new AreaMeasurement3D({
+        view: view
+      });
+
+      // skip the initial 'new measurement' button
+      activeWidget.viewModel.start().catch((error) => {
+        if (promiseUtils.isAbortError(error)) {
+          return; // don't display abort errors
+        }
+        throw error; // throw other errors since they are of interest
+      });
+
+      view.ui.add(activeWidget, "top-right");
+      setActiveButton(document.getElementById("areaButton"));
+      break;
+    case null:
+      if (activeWidget) {
+        view.ui.remove(activeWidget);
+        activeWidget.destroy();
+        activeWidget = null;
+      }
+      break;
+  }
+}
+
+function setActiveButton(selectedButton) {
+  // focus the view to activate keyboard shortcuts for sketching
+  view.focus();
+  const elements = document.getElementsByClassName("active");
+  for (let i = 0; i < elements.length; i++) {
+    elements[i].classList.remove("active");
+  }
+  if (selectedButton) {
+    selectedButton.classList.add("active");
+  }
+}
+
+/// ################## ELEVATIONCOLORIZED WIDGET ##################
+
+colooor = document.createElement("div");
+document.body.appendChild(colooor);
+                                                                                                                                      
+function updateColorRamp() {
+
+  const renderer = hillShadeLayer.renderer.clone();
+
+  z = colorbtn.values[0]-coloroffset.values[0];
+  z2 = coloroffset.values[0];
+
+  colorRamp = getRamp([
+
+    [0.0, 0,0,0],
+    [z2, 0,0,0],
+    [z2, 0,0,255],
+    [z2+.25*z, 0,255,0],
+    [z2+.5*z, 255,0,0],
+    [z2+.75*z, 255,255,255],
+    [z2+1.0*z, 255,255,255],
+    [1.0, 255,255,255]
+
+  ]);
+
+  renderer.colorRamp = MultipartColorRamp.fromJSON({ type: "multipart", colorRamps: colorRamp });
+
+  hillShadeLayer.renderer = renderer;
+                                                                      
+colooor.innerHTML = "";
+for (var x = 0; x < colorRamp.length-1; x++) {
+
+para = document.createElement("div");
+para.style.height = "10px";
+para.style.display = "inline-block";
+para.style.width = (100/colorRamp.length)+"%";
+para.style.backgroundColor = "rgb(" + 
+colorRamp[x].fromColor[0] + ", " + 
+colorRamp[x].fromColor[1] + ", " + 
+colorRamp[x].fromColor[2] + ")";
+colooor.appendChild(para);
+
+}
+
+}
+
+function updateRenderer() {
+
+  const renderer = hillShadeLayer.renderer.clone();
+
+  hillShadeLayer.opacity = opacitySlider.values[0];
+
+  renderer.zFactor = zFactorSlider.values[0];
+  renderer.altitude = altitudeSlider.values[0];
+  renderer.azimuth = azimuthSlider.values[0];
+
+  hillShadeLayer.renderer = renderer;
+
+}
+
+zFactorSlider = createSlider("zFactor",1,10,4, updateRenderer);  
+altitudeSlider = createSlider("altitude",0,90,80,updateRenderer);
+azimuthSlider = createSlider("azimuth",0,360,180,updateRenderer);
+
+opacitySlider = createSlider("opacity",0,1,.8, updateRenderer);  
+coloroffset = createSlider("colorOffset",0,.5,.04, updateColorRamp);
+colorbtn = createSlider("colorWidth",0,.5,.14, updateColorRamp);
+
+
+// getJSON(
+  
+//   "https://climbingaway.fr/fr/sites-escalade/carte-du-monde-des-sites-d-escalade/index.php?option=com_cartes_sites&task=getMarkPays",
+
+//   function callback(response) { createMarkerLayer(JSON.parse(response).data, [226, 119, 10], "coor_1", "coor_2"); }, 
+  
+//   "id_pays=16&nom_region=NA"
+  
+// );
+
+
+function updateMarkers() {
+
+  for (let i = 0; i < markers.length; i++) { view.graphics.remove(markers[i]) }
+  markers = []
+  createMarkerLayer(climbingaway[0].data,[226, 119, 10], "coor_1", "coor_2")
+  createMarkerLayer(paraliste,[226, 100, 225], "lat", "lon");
+  createMarkerLayer(canyondata["c"],[100, 200, 225], "c", "d");
+
+  updateColorRamp();
+  updateRenderer();
+
+}
+
+updateMarkers();
+
+});
+</script>
+
+<div id="viewDiv"></div>
+<div id="rendererDiv" class="esri-widget">
+  <div id="topbar">
+    <button
+      class="action-button esri-icon-measure-line"
+      id="distanceButton"
+      type="button"
+      title="Measure distance between two or more points"
+    ></button>
+    <button
+      class="action-button esri-icon-measure-area"
+      id="areaButton"
+      type="button"
+      title="Measure area"
+    ></button>
+  </div>
+</div>
